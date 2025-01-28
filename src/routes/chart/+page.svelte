@@ -1,88 +1,131 @@
 <script lang="ts">
-	import { Axis, Brush, Chart, Spline, Highlight, Svg, Text, Tooltip } from 'layerchart';
-
-	import { State } from 'svelte-ux';
-	import { scaleOrdinal, scaleTime } from 'd3-scale';
-
-	import { epidata, epidataGroup } from './data';
+	import { get, writable } from 'svelte/store';
+	import { LineChart, Axis } from 'layerchart';
 	import moment from 'moment';
+	import { PeriodType, TextField, Button, Form } from 'svelte-ux';
+	import { scaleTime } from 'd3-scale';
 
-	const stateColors = {
-		ar: 'hsl(var(--color-info))',
-		ca: 'hsl(var(--color-success))',
-		tx: 'hsl(var(--color-warning))'
+	const colors = [
+		'hsl(var(--color-info))',
+		'hsl(var(--color-success))',
+		'hsl(var(--color-warning))',
+		'hsl(var(--color-danger))'
+	];
+
+	type EpidataResult = {
+		epidata: Array<EpidataRow>;
 	};
+
+	type EpidataRow = {
+		value: number;
+		source: string;
+		signal: string;
+		time_type: string;
+		time_value: Date;
+		geo_type: string;
+		geo_value: string;
+	};
+
+	function getCovidcastResponse(
+		source: string,
+		signal: string,
+		time_type: string,
+		time_value: string,
+		geo_type: string,
+		geo_value: string
+	) {
+		const url = new URL('https://api.delphi.cmu.edu/epidata/covidcast/');
+		const params = new URLSearchParams(
+			Object.entries({
+				signal: `${source}:${signal}`,
+				time: `${time_type}:${time_value}`,
+				geo: `${geo_type}:${geo_value}`
+			})
+		);
+		return fetch(url.toString(), { method: 'POST', body: params }).then((d) => d.json());
+	}
+
+	let chartData = writable([] as Array<EpidataRow>[]); // 2D array
+
+	function addDataset(
+		source: string,
+		signal: string,
+		time_type: string,
+		time_value: string,
+		geo_type: string,
+		geo_value: string
+	) {
+		getCovidcastResponse(source, signal, time_type, time_value, geo_type, geo_value).then((res) => {
+			const data: EpidataResult = res as EpidataResult;
+			const convertedData = data.epidata.map((t) => {
+				return {
+					value: t.value,
+					source: t.source,
+					signal: t.signal,
+					time_type: t.time_type,
+					time_value: moment(t.time_value.toString(), 'YYYYMMDD').toDate(),
+					geo_type: t.geo_type,
+					geo_value: t.geo_value
+				};
+			}) as Array<EpidataRow>;
+			let cd = get(chartData);
+			cd.push(convertedData);
+			chartData.set(cd);
+		});
+	}
+
+	addDataset('fb-survey', 'smoothed_cli', 'day', '20200406-20240406', 'state', 'ar');
+	addDataset('fb-survey', 'smoothed_cli', 'day', '20200406-20240406', 'state', 'ca');
+	addDataset('fb-survey', 'smoothed_cli', 'day', '20200406-20240406', 'state', 'tx');
+
+	let dataSource = writable('fb-survey');
+	let signal = writable('smoothed_cli');
+	let timeType = writable('day');
+	let timeValue = writable('20200406-20240406');
+	let geoType = writable('state');
+	let geoValue = writable('pa');
 </script>
 
 <main class="p-2">
 	<h1 class="text-xl font-semibold mb-1">COVIDCast multi-series example</h1>
-	<h2 class="text-xl mb-1">
-		Data source: <a
-			href="https://api.delphi.cmu.edu/epidata/covidcast/?signal=fb-survey:smoothed_cli&time=day:20200406-20240406&geo=state:ar,ca,tx"
-			>https://api.delphi.cmu.edu/epidata/covidcast/?signal=fb-survey:smoothed_cli&time=day:20200406-20240406&geo=state:ar,ca,tx</a
+	<div class="grid grid-cols-4 gap-2">
+		<TextField label="Data Source" placeholder="fb-survey" bind:value={$dataSource} />
+		<TextField label="Signal" placeholder="smoothed_cli" bind:value={$signal} />
+		<TextField label="Time Type" placeholder="day" bind:value={$timeType} />
+		<TextField label="Time Value" placeholder="20200406-20240406" bind:value={$timeValue} />
+		<TextField label="Geo Type" placeholder="state" bind:value={$geoType} />
+		<TextField label="Geo Value" placeholder="pa" bind:value={$geoValue} />
+		<Button
+			variant="fill"
+			color="primary"
+			on:click={() => {
+				addDataset($dataSource, $signal, $timeType, $timeValue, $geoType, $geoValue);
+			}}>Add Dataset</Button
 		>
-	</h2>
-	<div class="h-[600px] p-4 border rounded">
-		<State initial={{ xDomain: [null, null], yDomain: [0, null] }} let:value let:set>
-			<Chart
-				data={epidata}
-				x="time_value"
-				xScale={scaleTime()}
-				xDomain={value?.xDomain}
-				y="value"
-				yDomain={value?.yDomain}
-				c="geo_value"
-				cScale={scaleOrdinal()}
-				cDomain={Object.keys(stateColors)}
-				cRange={Object.values(stateColors)}
-				padding={{ left: 16, bottom: 24, right: 48 }}
-				tooltip={{ mode: 'voronoi' }}
-				let:tooltip
-				let:cScale
-			>
-				<Svg>
-					<Axis placement="left" grid rule />
-					<Axis placement="bottom" rule />
-					{#each epidataGroup as [group, data]}
-						{@const color =
-							tooltip.data == null || tooltip.data.geo_value === group
-									? cScale?.(group)
-								: 'hsl(var(--color-surface-content) / 20%)'}
-						<Spline {data} class="stroke-2" stroke={color}>
-							<svelte:fragment slot="end">
-								<circle r={4} fill={color} />
-								<Text
-									value={group}
-									verticalAnchor="middle"
-									dx={6}
-									dy={-2}
-									class="text-xs"
-									fill={color}
-								/>
-							</svelte:fragment>
-						</Spline>
-					{/each}
-					<Highlight points lines />
-					<Brush
-						axis="both"
-						on:change={(e) => {
-							set({
-								// @ts-expect-error
-								xDomain: e.detail.xDomain,
-								// @ts-expect-error
-								yDomain: e.detail.yDomain
-							});
-						}}
-					/>
-				</Svg>
-
-				<Tooltip.Root let:data>
-					<Tooltip.Header>{moment(data.time_value).format('MMMM Do YYYY')}</Tooltip.Header>
-					<Tooltip.List>
-						<Tooltip.Item label={data.geo_value} value={data.value} />
-					</Tooltip.List>
-				</Tooltip.Root>
-			</Chart>
-		</State>
+	</div>
+	<div class="h-[600px] p-4">
+		<LineChart
+			x="time_value"
+			y="value"
+			series={$chartData.map((element, index) => {
+				return {
+					key: `[${element[0].source}:${element[0].signal}] ${element[0].geo_type}:${element[0].geo_value}`,
+					data: element,
+					color: colors[index % colors.length]
+				};
+			})}
+			legend
+			brush
+		>
+			<svelte:fragment slot="axis">
+				<Axis
+					placement="bottom"
+					rule
+					ticks={(scale) => scaleTime(scale.domain(), scale.range()).ticks()}
+					format={PeriodType.Day}
+				/>
+				<Axis placement="left" rule />
+			</svelte:fragment>
+		</LineChart>
 	</div>
 </main>

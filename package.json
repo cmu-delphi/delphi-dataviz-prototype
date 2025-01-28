@@ -44,7 +44,7 @@
 		"@types/d3": "^7.4.3",
 		"d3-scale": "^4.0.2",
 		"dotenv": "16.4.2",
-		"layerchart": "^0.70.1",
+		"layerchart": "^0.81.2",
 		"moment": "^2.30.1"
 	}
 }
